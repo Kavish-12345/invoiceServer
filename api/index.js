@@ -26,8 +26,7 @@ app.get('/health', (req, res) => {
     status: 'OK',
     timestamp: new Date().toISOString(),
     environment: 'Vercel Serverless',
-    apiKeyConfigured: !!process.env.API_KEY,
-    apiKeyLength: process.env.API_KEY ? process.env.API_KEY.length : 0
+    authorizationEnabled: false
   });
 });
 
@@ -67,8 +66,7 @@ app.post('/api/verify-invoice', async (req, res) => {
     console.log('Request method:', req.method);
     console.log('Request URL:', req.url);
     console.log('Environment variables check:');
-    console.log('- API_KEY exists:', !!process.env.API_KEY);
-    console.log('- API_KEY length:', process.env.API_KEY ? process.env.API_KEY.length : 0);
+    console.log('- Authorization disabled for development');
     
     const { invoiceId } = req.body;
 
@@ -83,65 +81,7 @@ app.post('/api/verify-invoice', async (req, res) => {
       });
     }
 
-    // More flexible authorization check
-    const authHeader = req.headers.authorization || req.headers.Authorization;
-    console.log('Auth header received:', authHeader ? 'Present' : 'Missing');
-    console.log('Auth header value:', authHeader);
-    
-    if (!authHeader) {
-      console.log('ERROR: No authorization header found');
-      return res.status(401).json({ 
-        error: 'Unauthorized',
-        message: 'Authorization header required',
-        isValid: false,
-        debug: {
-          headersReceived: Object.keys(req.headers),
-          authHeaderPresent: false
-        }
-      });
-    }
-
-    let token;
-    if (authHeader.startsWith('Bearer ')) {
-      token = authHeader.split(' ')[1];
-    } else {
-      // Sometimes the token might be sent without "Bearer " prefix
-      token = authHeader;
-    }
-
-    const expectedToken = process.env.API_KEY;
-    
-    if (!expectedToken) {
-      console.log('ERROR: API_KEY not set in environment');
-      return res.status(500).json({ 
-        error: 'Server configuration error',
-        message: 'API key not configured',
-        isValid: false
-      });
-    }
-    
-    console.log('Token comparison:');
-    console.log('- Received token length:', token ? token.length : 0);
-    console.log('- Expected token length:', expectedToken.length);
-    console.log('- Tokens match:', token === expectedToken);
-    console.log('- Received token (first 10 chars):', token ? token.substring(0, 10) + '...' : 'undefined');
-    console.log('- Expected token (first 10 chars):', expectedToken.substring(0, 10) + '...');
-    
-    if (token !== expectedToken) {
-      console.log('ERROR: Invalid API key provided');
-      return res.status(401).json({ 
-        error: 'Unauthorized',
-        message: 'Invalid API key',
-        isValid: false,
-        debug: {
-          tokenReceived: !!token,
-          tokenLength: token ? token.length : 0,
-          expectedLength: expectedToken.length
-        }
-      });
-    }
-
-    console.log(`✅ Authentication successful`);
+    console.log('⚠️  No authorization check - running in development mode');
     console.log(`Processing invoice verification - ID: ${invoiceId}`);
 
     const isValid = await verifyInvoiceLogic(invoiceId);
