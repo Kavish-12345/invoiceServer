@@ -7,15 +7,15 @@ const rateLimit = require('express-rate-limit');
 const app = express();
 
 // Middleware
-app.use(helmet()); // Security headers
-app.use(cors()); // Enable CORS
-app.use(express.json({ limit: '10mb' })); // Parse JSON bodies
-app.use(express.urlencoded({ extended: true })); // Parse URL-encoded bodies
+app.use(helmet());
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // Limit each IP to 100 requests per windowMs
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
   message: 'Too many requests from this IP, please try again later.'
 });
 app.use('/api/', limiter);
@@ -26,26 +26,24 @@ app.get('/health', (req, res) => {
     status: 'OK',
     timestamp: new Date().toISOString(),
     environment: 'Vercel Serverless',
-    apiKeyConfigured: !!process.env.API_KEY
+    apiKeyConfigured: !!process.env.API_KEY,
+    apiKeyLength: process.env.API_KEY ? process.env.API_KEY.length : 0
   });
 });
 
 // Debug endpoint to test without auth
 app.post('/debug/verify-invoice', async (req, res) => {
   try {
-    const { invoiceId, amount } = req.body;
-    console.log('DEBUG: Received request:', { invoiceId, amount, type: typeof amount });
+    const { invoiceId } = req.body;
+    console.log('DEBUG: Received request:', { invoiceId, type: typeof invoiceId });
     
-    const isValid = await verifyInvoiceLogic(invoiceId, amount);
+    const isValid = await verifyInvoiceLogic(invoiceId);
     
     res.json({
       isValid,
       invoiceId,
-      amount,
       debug: {
         invoiceIdType: typeof invoiceId,
-        amountType: typeof amount,
-        amountParsed: parseFloat(amount),
         timestamp: Date.now(),
         environment: 'Vercel'
       }
@@ -60,113 +58,146 @@ app.post('/debug/verify-invoice', async (req, res) => {
   }
 });
 
-// Main API endpoint with enhanced debugging
+// Main API endpoint - This is what your Chainlink function calls
 app.post('/api/verify-invoice', async (req, res) => {
   try {
-    console.log('=== VERIFICATION REQUEST START ===');
-    console.log('Headers:', req.headers);
-    console.log('Body:', req.body);
-    console.log('Environment:', process.env.NODE_ENV);
+    console.log('=== CHAINLINK VERIFICATION REQUEST START ===');
+    console.log('Full request headers:', JSON.stringify(req.headers, null, 2));
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
+    console.log('Request method:', req.method);
+    console.log('Request URL:', req.url);
+    console.log('Environment variables check:');
+    console.log('- API_KEY exists:', !!process.env.API_KEY);
+    console.log('- API_KEY length:', process.env.API_KEY ? process.env.API_KEY.length : 0);
     
-    const { invoiceId, amount } = req.body;
+    const { invoiceId } = req.body;
 
     // Enhanced parameter validation
-    if (!invoiceId) {
+    if (!invoiceId && invoiceId !== 0) {
       console.log('ERROR: Missing invoiceId');
       return res.status(400).json({ 
         error: 'Missing required parameters',
         message: 'invoiceId is required',
-        received: { invoiceId, amount }
+        received: { invoiceId },
+        isValid: false
       });
     }
 
-    if (!amount && amount !== 0) {
-      console.log('ERROR: Missing amount');
-      return res.status(400).json({ 
-        error: 'Missing required parameters',
-        message: 'amount is required',
-        received: { invoiceId, amount }
-      });
-    }
-
-    // Validate authorization header
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.log('ERROR: Missing or invalid authorization header');
+    // More flexible authorization check
+    const authHeader = req.headers.authorization || req.headers.Authorization;
+    console.log('Auth header received:', authHeader ? 'Present' : 'Missing');
+    console.log('Auth header value:', authHeader);
+    
+    if (!authHeader) {
+      console.log('ERROR: No authorization header found');
       return res.status(401).json({ 
         error: 'Unauthorized',
-        message: 'Valid Bearer token required'
+        message: 'Authorization header required',
+        isValid: false,
+        debug: {
+          headersReceived: Object.keys(req.headers),
+          authHeaderPresent: false
+        }
       });
     }
 
-    const token = authHeader.split(' ')[1];
+    let token;
+    if (authHeader.startsWith('Bearer ')) {
+      token = authHeader.split(' ')[1];
+    } else {
+      // Sometimes the token might be sent without "Bearer " prefix
+      token = authHeader;
+    }
+
     const expectedToken = process.env.API_KEY;
     
     if (!expectedToken) {
       console.log('ERROR: API_KEY not set in environment');
       return res.status(500).json({ 
         error: 'Server configuration error',
-        message: 'API key not configured'
+        message: 'API key not configured',
+        isValid: false
       });
     }
     
+    console.log('Token comparison:');
+    console.log('- Received token length:', token ? token.length : 0);
+    console.log('- Expected token length:', expectedToken.length);
+    console.log('- Tokens match:', token === expectedToken);
+    console.log('- Received token (first 10 chars):', token ? token.substring(0, 10) + '...' : 'undefined');
+    console.log('- Expected token (first 10 chars):', expectedToken.substring(0, 10) + '...');
+    
     if (token !== expectedToken) {
       console.log('ERROR: Invalid API key provided');
-      console.log('Provided token:', token);
-      console.log('Expected token exists:', !!expectedToken);
       return res.status(401).json({ 
         error: 'Unauthorized',
-        message: 'Invalid API key'
+        message: 'Invalid API key',
+        isValid: false,
+        debug: {
+          tokenReceived: !!token,
+          tokenLength: token ? token.length : 0,
+          expectedLength: expectedToken.length
+        }
       });
     }
 
-    console.log(`Processing invoice verification - ID: ${invoiceId}, Amount: ${amount}`);
+    console.log(`✅ Authentication successful`);
+    console.log(`Processing invoice verification - ID: ${invoiceId}`);
 
-    const isValid = await verifyInvoiceLogic(invoiceId, amount);
+    const isValid = await verifyInvoiceLogic(invoiceId);
 
     console.log(`Verification result: ${isValid}`);
-    console.log('=== VERIFICATION REQUEST END ===');
+    console.log('=== CHAINLINK VERIFICATION REQUEST END ===');
 
-    res.json({
+    // Return response in the exact format Chainlink expects
+    const response = {
       isValid,
       invoiceId,
-      amount,
       timestamp: Date.now(),
       message: isValid ? 'Invoice verified successfully' : 'Invoice verification failed'
-    });
+    };
+
+    console.log('Sending response:', JSON.stringify(response, null, 2));
+    res.json(response);
 
   } catch (error) {
     console.error('Invoice verification error:', error);
+    console.error('Error stack:', error.stack);
+    
+    // Always return isValid: false on error
     res.status(500).json({
       error: 'Invoice verification failed',
       message: error.message,
-      isValid: false
+      isValid: false,
+      timestamp: Date.now()
     });
   }
 });
 
-// Enhanced invoice verification function with better debugging
-async function verifyInvoiceLogic(invoiceId, amount) {
+// Simplified invoice verification function - only checks if invoice ID exists
+async function verifyInvoiceLogic(invoiceId) {
   try {
     console.log(`\n--- VERIFICATION LOGIC START ---`);
     console.log(`Input - InvoiceId: ${invoiceId} (type: ${typeof invoiceId})`);
-    console.log(`Input - Amount: ${amount} (type: ${typeof amount})`);
     
-    // Simulate database/ERP lookup
+    // Simulate database/ERP lookup delay
     await new Promise(resolve => setTimeout(resolve, 100));
     
-    // Mock invoice database
+    // Mock invoice database - simplified to only check existence
     const mockInvoices = {
-      // Test invoices with various amount formats
-      '1001': { amount: 1250.50, status: 'pending', supplier: 'TechCorp Solutions' },
-      '1002': { amount: 3750.00, status: 'pending', supplier: 'Global Manufacturing Ltd' },
-      '1003': { amount: 890.25, status: 'pending', supplier: 'Office Supplies Pro' },
-      '12345': { amount: 5000.00, status: 'pending', supplier: 'Test Supplier' },
-      '99999': { amount: 999.99, status: 'pending', supplier: 'Debug Supplier' },
-      
-      // Different status invoices
-      '2001': { amount: 3200.00, status: 'paid', supplier: 'Paid Supplier A' },
-      '2002': { amount: 1800.75, status: 'rejected', supplier: 'Rejected Supplier B' },
+      '1001': { supplier: 'TechCorp Solutions', status: 'pending' },
+      '1002': { supplier: 'Global Manufacturing Ltd', status: 'pending' },
+      '1003': { supplier: 'Office Supplies Pro', status: 'pending' },
+      '12345': { supplier: 'Test Supplier', status: 'pending' },
+      '99999': { supplier: 'Debug Supplier', status: 'pending' },
+      '100': { supplier: 'Small Invoice', status: 'pending' },
+      '200': { supplier: 'Medium Invoice', status: 'pending' },
+      '300': { supplier: 'Large Invoice', status: 'pending' },
+      '2001': { supplier: 'Supplier A', status: 'pending' },
+      '2002': { supplier: 'Supplier B', status: 'pending' },
+      '5000': { supplier: 'New Supplier', status: 'pending' },
+      '6000': { supplier: 'Another Supplier', status: 'pending' },
+      '7000': { supplier: 'Final Supplier', status: 'pending' }
     };
 
     const invoiceIdStr = invoiceId.toString();
@@ -177,46 +208,13 @@ async function verifyInvoiceLogic(invoiceId, amount) {
     
     if (!invoice) {
       console.log(`❌ Invoice ${invoiceIdStr} not found in database`);
-      return false;
-    }
-
-    if (invoice.status !== 'pending') {
-      console.log(`❌ Invoice ${invoiceIdStr} status is '${invoice.status}', not 'pending'`);
-      return false;
-    }
-
-    // Enhanced amount comparison with multiple parsing attempts
-    const expectedAmount = parseFloat(invoice.amount);
-    let providedAmount;
-    
-    // Try different parsing methods
-    if (typeof amount === 'string') {
-      providedAmount = parseFloat(amount);
-    } else if (typeof amount === 'number') {
-      providedAmount = amount;
-    } else {
-      console.log(`❌ Invalid amount type: ${typeof amount}`);
-      return false;
-    }
-    
-    console.log(`Expected amount: ${expectedAmount}`);
-    console.log(`Provided amount: ${providedAmount}`);
-    
-    // Use a small epsilon for floating point comparison
-    const epsilon = 0.001;
-    const amountDifference = Math.abs(expectedAmount - providedAmount);
-    
-    console.log(`Amount difference: ${amountDifference}`);
-    
-    if (amountDifference > epsilon) {
-      console.log(`❌ Invoice ${invoiceIdStr} amount mismatch:`);
-      console.log(`   Expected: ${expectedAmount}`);
-      console.log(`   Provided: ${providedAmount}`);
-      console.log(`   Difference: ${amountDifference}`);
+      console.log(`Available invoices:`, Object.keys(mockInvoices));
       return false;
     }
 
     console.log(`✅ Invoice ${invoiceIdStr} verified successfully`);
+    console.log(`   Supplier: ${invoice.supplier}`);
+    console.log(`   Status: ${invoice.status}`);
     console.log(`--- VERIFICATION LOGIC END ---\n`);
     return true;
 
@@ -229,16 +227,15 @@ async function verifyInvoiceLogic(invoiceId, amount) {
 // Test endpoint for easier debugging
 app.post('/api/test-verification', async (req, res) => {
   try {
-    const { invoiceId = '12345', amount = '5000' } = req.body;
+    const { invoiceId = '12345' } = req.body;
     
-    console.log('Test verification request:', { invoiceId, amount });
+    console.log('Test verification request:', { invoiceId });
     
-    const isValid = await verifyInvoiceLogic(invoiceId, amount);
+    const isValid = await verifyInvoiceLogic(invoiceId);
     
     res.json({
       isValid,
       invoiceId,
-      amount,
       timestamp: Date.now(),
       message: 'Test verification completed',
       encodedResult: isValid ? 1 : 0,
@@ -261,13 +258,19 @@ app.get('/api/invoice/:invoiceId', async (req, res) => {
     const { invoiceId } = req.params;
     
     const mockInvoices = {
-      '1001': { id: '1001', amount: 1250.50, status: 'pending', supplier: 'TechCorp Solutions' },
-      '1002': { id: '1002', amount: 3750.00, status: 'pending', supplier: 'Global Manufacturing Ltd' },
-      '1003': { id: '1003', amount: 890.25, status: 'pending', supplier: 'Office Supplies Pro' },
-      '12345': { id: '12345', amount: 5000.00, status: 'pending', supplier: 'Test Supplier' },
-      '99999': { id: '99999', amount: 999.99, status: 'pending', supplier: 'Debug Supplier' },
-      '2001': { id: '2001', amount: 3200.00, status: 'paid', supplier: 'Paid Supplier A' },
-      '2002': { id: '2002', amount: 1800.75, status: 'rejected', supplier: 'Rejected Supplier B' },
+      '1001': { id: '1001', supplier: 'TechCorp Solutions', status: 'pending' },
+      '1002': { id: '1002', supplier: 'Global Manufacturing Ltd', status: 'pending' },
+      '1003': { id: '1003', supplier: 'Office Supplies Pro', status: 'pending' },
+      '12345': { id: '12345', supplier: 'Test Supplier', status: 'pending' },
+      '99999': { id: '99999', supplier: 'Debug Supplier', status: 'pending' },
+      '100': { id: '100', supplier: 'Small Invoice', status: 'pending' },
+      '200': { id: '200', supplier: 'Medium Invoice', status: 'pending' },
+      '300': { id: '300', supplier: 'Large Invoice', status: 'pending' },
+      '2001': { id: '2001', supplier: 'Supplier A', status: 'pending' },
+      '2002': { id: '2002', supplier: 'Supplier B', status: 'pending' },
+      '5000': { id: '5000', supplier: 'New Supplier', status: 'pending' },
+      '6000': { id: '6000', supplier: 'Another Supplier', status: 'pending' },
+      '7000': { id: '7000', supplier: 'Final Supplier', status: 'pending' }
     };
 
     const invoice = mockInvoices[invoiceId];
@@ -298,13 +301,19 @@ app.get('/api/invoice/:invoiceId', async (req, res) => {
 // List all available invoices for testing
 app.get('/api/invoices', (req, res) => {
   const mockInvoices = {
-    '1001': { id: '1001', amount: 1250.50, status: 'pending', supplier: 'TechCorp Solutions' },
-    '1002': { id: '1002', amount: 3750.00, status: 'pending', supplier: 'Global Manufacturing Ltd' },
-    '1003': { id: '1003', amount: 890.25, status: 'pending', supplier: 'Office Supplies Pro' },
-    '12345': { id: '12345', amount: 5000.00, status: 'pending', supplier: 'Test Supplier' },
-    '99999': { id: '99999', amount: 999.99, status: 'pending', supplier: 'Debug Supplier' },
-    '2001': { id: '2001', amount: 3200.00, status: 'paid', supplier: 'Paid Supplier A' },
-    '2002': { id: '2002', amount: 1800.75, status: 'rejected', supplier: 'Rejected Supplier B' },
+    '1001': { id: '1001', supplier: 'TechCorp Solutions', status: 'pending' },
+    '1002': { id: '1002', supplier: 'Global Manufacturing Ltd', status: 'pending' },
+    '1003': { id: '1003', supplier: 'Office Supplies Pro', status: 'pending' },
+    '12345': { id: '12345', supplier: 'Test Supplier', status: 'pending' },
+    '99999': { id: '99999', supplier: 'Debug Supplier', status: 'pending' },
+    '100': { id: '100', supplier: 'Small Invoice', status: 'pending' },
+    '200': { id: '200', supplier: 'Medium Invoice', status: 'pending' },
+    '300': { id: '300', supplier: 'Large Invoice', status: 'pending' },
+    '2001': { id: '2001', supplier: 'Supplier A', status: 'pending' },
+    '2002': { id: '2002', supplier: 'Supplier B', status: 'pending' },
+    '5000': { id: '5000', supplier: 'New Supplier', status: 'pending' },
+    '6000': { id: '6000', supplier: 'Another Supplier', status: 'pending' },
+    '7000': { id: '7000', supplier: 'Final Supplier', status: 'pending' }
   };
 
   res.json({
