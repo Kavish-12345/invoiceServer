@@ -20,6 +20,27 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
+// Helper function to normalize invoice ID
+function normalizeInvoiceId(invoiceId) {
+  if (invoiceId === null || invoiceId === undefined || invoiceId === '') {
+    return null;
+  }
+  
+  // Convert to string and remove any whitespace
+  const idStr = String(invoiceId).trim();
+  
+  // Handle the case where it might be "0" 
+  if (idStr === '0') {
+    return '0';
+  }
+  
+  // Remove leading zeros but keep at least one digit
+  const normalizedId = idStr.replace(/^0+/, '') || '0';
+  
+  console.log(`Normalizing ID: "${invoiceId}" (${typeof invoiceId}) -> "${normalizedId}"`);
+  return normalizedId;
+}
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({
@@ -41,6 +62,7 @@ app.post('/debug/verify-invoice', async (req, res) => {
     res.json({
       isValid,
       invoiceId,
+      normalizedId: normalizeInvoiceId(invoiceId),
       debug: {
         invoiceIdType: typeof invoiceId,
         timestamp: Date.now(),
@@ -71,7 +93,7 @@ app.post('/api/verify-invoice', async (req, res) => {
     const { invoiceId } = req.body;
 
     // Enhanced parameter validation
-    if (!invoiceId && invoiceId !== 0) {
+    if (!invoiceId && invoiceId !== 0 && invoiceId !== '0') {
       console.log('ERROR: Missing invoiceId');
       return res.status(400).json({ 
         error: 'Missing required parameters',
@@ -81,7 +103,7 @@ app.post('/api/verify-invoice', async (req, res) => {
       });
     }
 
-    console.log('⚠️  No authorization check - running in development mode');
+    console.log('⚠  No authorization check - running in development mode');
     console.log(`Processing invoice verification - ID: ${invoiceId}`);
 
     const isValid = await verifyInvoiceLogic(invoiceId);
@@ -93,6 +115,7 @@ app.post('/api/verify-invoice', async (req, res) => {
     const response = {
       isValid,
       invoiceId,
+      normalizedId: normalizeInvoiceId(invoiceId),
       timestamp: Date.now(),
       message: isValid ? 'Invoice verified successfully' : 'Invoice verification failed'
     };
@@ -114,16 +137,26 @@ app.post('/api/verify-invoice', async (req, res) => {
   }
 });
 
-// Simplified invoice verification function - only checks if invoice ID exists
+// Enhanced invoice verification function with better ID handling
 async function verifyInvoiceLogic(invoiceId) {
   try {
-    console.log(`\n--- VERIFICATION LOGIC START ---`);
+    console.log('\n--- VERIFICATION LOGIC START ---');
     console.log(`Input - InvoiceId: ${invoiceId} (type: ${typeof invoiceId})`);
+    
+    // Normalize the invoice ID
+    const normalizedId = normalizeInvoiceId(invoiceId);
+    
+    if (normalizedId === null) {
+      console.log('❌ Invalid invoice ID provided');
+      return false;
+    }
+    
+    console.log(`Normalized ID: "${normalizedId}"`);
     
     // Simulate database/ERP lookup delay
     await new Promise(resolve => setTimeout(resolve, 100));
     
-    // Mock invoice database - simplified to only check existence
+    // Mock invoice database - using normalized keys
     const mockInvoices = {
       '1001': { supplier: 'TechCorp Solutions', status: 'pending' },
       '1002': { supplier: 'Global Manufacturing Ltd', status: 'pending' },
@@ -137,25 +170,25 @@ async function verifyInvoiceLogic(invoiceId) {
       '2002': { supplier: 'Supplier B', status: 'pending' },
       '5000': { supplier: 'New Supplier', status: 'pending' },
       '6000': { supplier: 'Another Supplier', status: 'pending' },
-      '7000': { supplier: 'Final Supplier', status: 'pending' }
+      '7000': { supplier: 'Final Supplier', status: 'pending' },
+      '0': { supplier: 'Zero Invoice', status: 'pending' } // Handle zero case
     };
 
-    const invoiceIdStr = invoiceId.toString();
-    const invoice = mockInvoices[invoiceIdStr];
+    const invoice = mockInvoices[normalizedId];
     
-    console.log(`Looking up invoice: ${invoiceIdStr}`);
-    console.log(`Found invoice:`, invoice);
+    console.log(`Looking up invoice: "${normalizedId}"`);
+    console.log('Found invoice:', invoice);
     
     if (!invoice) {
-      console.log(`❌ Invoice ${invoiceIdStr} not found in database`);
-      console.log(`Available invoices:`, Object.keys(mockInvoices));
+      console.log(`❌ Invoice ${normalizedId} not found in database`);
+      console.log('Available invoices:', Object.keys(mockInvoices));
       return false;
     }
 
-    console.log(`✅ Invoice ${invoiceIdStr} verified successfully`);
+    console.log(`✅ Invoice ${normalizedId} verified successfully`);
     console.log(`   Supplier: ${invoice.supplier}`);
     console.log(`   Status: ${invoice.status}`);
-    console.log(`--- VERIFICATION LOGIC END ---\n`);
+    console.log('--- VERIFICATION LOGIC END ---\n');
     return true;
 
   } catch (error) {
@@ -172,10 +205,12 @@ app.post('/api/test-verification', async (req, res) => {
     console.log('Test verification request:', { invoiceId });
     
     const isValid = await verifyInvoiceLogic(invoiceId);
+    const normalizedId = normalizeInvoiceId(invoiceId);
     
     res.json({
       isValid,
       invoiceId,
+      normalizedId,
       timestamp: Date.now(),
       message: 'Test verification completed',
       encodedResult: isValid ? 1 : 0,
@@ -196,6 +231,7 @@ app.post('/api/test-verification', async (req, res) => {
 app.get('/api/invoice/:invoiceId', async (req, res) => {
   try {
     const { invoiceId } = req.params;
+    const normalizedId = normalizeInvoiceId(invoiceId);
     
     const mockInvoices = {
       '1001': { id: '1001', supplier: 'TechCorp Solutions', status: 'pending' },
@@ -210,15 +246,17 @@ app.get('/api/invoice/:invoiceId', async (req, res) => {
       '2002': { id: '2002', supplier: 'Supplier B', status: 'pending' },
       '5000': { id: '5000', supplier: 'New Supplier', status: 'pending' },
       '6000': { id: '6000', supplier: 'Another Supplier', status: 'pending' },
-      '7000': { id: '7000', supplier: 'Final Supplier', status: 'pending' }
+      '7000': { id: '7000', supplier: 'Final Supplier', status: 'pending' },
+      '0': { id: '0', supplier: 'Zero Invoice', status: 'pending' }
     };
 
-    const invoice = mockInvoices[invoiceId];
+    const invoice = mockInvoices[normalizedId];
     
     if (!invoice) {
       return res.status(404).json({
         error: 'Invoice not found',
         invoiceId,
+        normalizedId,
         availableInvoices: Object.keys(mockInvoices)
       });
     }
@@ -226,6 +264,8 @@ app.get('/api/invoice/:invoiceId', async (req, res) => {
     res.json({
       success: true,
       invoice,
+      originalId: invoiceId,
+      normalizedId,
       timestamp: Date.now()
     });
 
@@ -253,7 +293,8 @@ app.get('/api/invoices', (req, res) => {
     '2002': { id: '2002', supplier: 'Supplier B', status: 'pending' },
     '5000': { id: '5000', supplier: 'New Supplier', status: 'pending' },
     '6000': { id: '6000', supplier: 'Another Supplier', status: 'pending' },
-    '7000': { id: '7000', supplier: 'Final Supplier', status: 'pending' }
+    '7000': { id: '7000', supplier: 'Final Supplier', status: 'pending' },
+    '0': { id: '0', supplier: 'Zero Invoice', status: 'pending' }
   };
 
   res.json({
