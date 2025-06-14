@@ -11,5 +11,12 @@
       "src": "/(.*)",
       "dest": "api/index.js"
     }
-  ]
+  ],
+  "env": {
+    "NODE_ENV": "production",
+    "API_KEY": "@api-key",
+    "LOG_LEVEL": "info",
+    "RATE_LIMIT_WINDOW_MS": "900000",
+    "RATE_LIMIT_MAX_REQUESTS": "100"
+  }
 }
