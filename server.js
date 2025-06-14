@@ -30,24 +30,67 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Chainlink Functions API Routes
-
-// 1. Invoice verification endpoint - main endpoint for Chainlink Functions
-app.post('/api/verify-invoice', async (req, res) => {
+// Debug endpoint to test without auth
+app.post('/debug/verify-invoice', async (req, res) => {
   try {
     const { invoiceId, amount } = req.body;
+    console.log('DEBUG: Received request:', { invoiceId, amount, type: typeof amount });
+    
+    const isValid = await verifyInvoiceLogic(invoiceId, amount);
+    
+    res.json({
+      isValid,
+      invoiceId,
+      amount,
+      debug: {
+        invoiceIdType: typeof invoiceId,
+        amountType: typeof amount,
+        amountParsed: parseFloat(amount),
+        timestamp: Date.now()
+      }
+    });
+  } catch (error) {
+    console.error('DEBUG verification error:', error);
+    res.status(500).json({
+      error: 'Debug verification failed',
+      message: error.message,
+      isValid: false
+    });
+  }
+});
 
-    // Validate required parameters
-    if (!invoiceId || !amount) {
+// Main API endpoint with enhanced debugging
+app.post('/api/verify-invoice', async (req, res) => {
+  try {
+    console.log('=== VERIFICATION REQUEST START ===');
+    console.log('Headers:', req.headers);
+    console.log('Body:', req.body);
+    
+    const { invoiceId, amount } = req.body;
+
+    // Enhanced parameter validation
+    if (!invoiceId) {
+      console.log('ERROR: Missing invoiceId');
       return res.status(400).json({ 
         error: 'Missing required parameters',
-        message: 'Both invoiceId and amount are required'
+        message: 'invoiceId is required',
+        received: { invoiceId, amount }
+      });
+    }
+
+    if (!amount && amount !== 0) {
+      console.log('ERROR: Missing amount');
+      return res.status(400).json({ 
+        error: 'Missing required parameters',
+        message: 'amount is required',
+        received: { invoiceId, amount }
       });
     }
 
     // Validate authorization header
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.log('ERROR: Missing or invalid authorization header');
       return res.status(401).json({ 
         error: 'Unauthorized',
         message: 'Valid Bearer token required'
@@ -57,7 +100,16 @@ app.post('/api/verify-invoice', async (req, res) => {
     const token = authHeader.split(' ')[1];
     const expectedToken = process.env.API_KEY;
     
-    if (!expectedToken || token !== expectedToken) {
+    if (!expectedToken) {
+      console.log('ERROR: API_KEY not set in environment');
+      return res.status(500).json({ 
+        error: 'Server configuration error',
+        message: 'API key not configured'
+      });
+    }
+    
+    if (token !== expectedToken) {
+      console.log('ERROR: Invalid API key provided');
       return res.status(401).json({ 
         error: 'Unauthorized',
         message: 'Invalid API key'
@@ -66,14 +118,10 @@ app.post('/api/verify-invoice', async (req, res) => {
 
     console.log(`Processing invoice verification - ID: ${invoiceId}, Amount: ${amount}`);
 
-    // Mock invoice verification logic
-    // In a real implementation, you would:
-    // 1. Connect to your ERP system/database
-    // 2. Verify the invoice exists
-    // 3. Check if the amount matches
-    // 4. Validate other business rules
-    
     const isValid = await verifyInvoiceLogic(invoiceId, amount);
+
+    console.log(`Verification result: ${isValid}`);
+    console.log('=== VERIFICATION REQUEST END ===');
 
     res.json({
       isValid,
@@ -93,152 +141,128 @@ app.post('/api/verify-invoice', async (req, res) => {
   }
 });
 
-// Mock invoice verification function
+// Enhanced invoice verification function with better debugging
 async function verifyInvoiceLogic(invoiceId, amount) {
   try {
+    console.log(`\n--- VERIFICATION LOGIC START ---`);
+    console.log(`Input - InvoiceId: ${invoiceId} (type: ${typeof invoiceId})`);
+    console.log(`Input - Amount: ${amount} (type: ${typeof amount})`);
+    
     // Simulate database/ERP lookup
-    await new Promise(resolve => setTimeout(resolve, 100)); // Simulate async operation
+    await new Promise(resolve => setTimeout(resolve, 100));
     
     // Mock invoice database
     const mockInvoices = {
-      // Pending invoices (valid for verification)
-      '1001': { amount: 1250.50, status: 'pending', supplier: 'TechCorp Solutions', createdAt: '2024-01-15', category: 'Software License' },
-      '1002': { amount: 3750.00, status: 'pending', supplier: 'Global Manufacturing Ltd', createdAt: '2024-01-16', category: 'Raw Materials' },
-      '1003': { amount: 890.25, status: 'pending', supplier: 'Office Supplies Pro', createdAt: '2024-01-17', category: 'Office Equipment' },
-      '1004': { amount: 15000.00, status: 'pending', supplier: 'Construction Materials Inc', createdAt: '2024-01-18', category: 'Construction' },
-      '1005': { amount: 2200.75, status: 'pending', supplier: 'Marketing Agency Plus', createdAt: '2024-01-19', category: 'Marketing Services' },
-      '1006': { amount: 450.00, status: 'pending', supplier: 'Local Catering Services', createdAt: '2024-01-20', category: 'Catering' },
-      '1007': { amount: 8500.00, status: 'pending', supplier: 'IT Consulting Group', createdAt: '2024-01-21', category: 'Consulting' },
-      '1008': { amount: 1875.30, status: 'pending', supplier: 'Energy Solutions Corp', createdAt: '2024-01-22', category: 'Utilities' },
-      '1009': { amount: 12000.00, status: 'pending', supplier: 'Heavy Machinery Rentals', createdAt: '2024-01-23', category: 'Equipment Rental' },
-      '1010': { amount: 675.50, status: 'pending', supplier: 'Legal Services LLC', createdAt: '2024-01-24', category: 'Legal Services' },
+      // Test invoices with various amount formats
+      '1001': { amount: 1250.50, status: 'pending', supplier: 'TechCorp Solutions' },
+      '1002': { amount: 3750.00, status: 'pending', supplier: 'Global Manufacturing Ltd' },
+      '1003': { amount: 890.25, status: 'pending', supplier: 'Office Supplies Pro' },
+      '12345': { amount: 5000.00, status: 'pending', supplier: 'Test Supplier' },
+      '99999': { amount: 999.99, status: 'pending', supplier: 'Debug Supplier' },
       
-      // Test invoices
-      '12345': { amount: 5000.00, status: 'pending', supplier: 'Test Supplier', createdAt: '2024-01-25', category: 'Test Category' },
-      '99999': { amount: 999.99, status: 'pending', supplier: 'Debug Supplier', createdAt: '2024-01-26', category: 'Testing' },
-      '55555': { amount: 7500.25, status: 'pending', supplier: 'Demo Company', createdAt: '2024-01-27', category: 'Demo Services' },
-      
-      // Already processed invoices (invalid for verification)
-      '2001': { amount: 3200.00, status: 'paid', supplier: 'Paid Supplier A', createdAt: '2024-01-10', category: 'Completed Services', paidAt: '2024-01-28' },
-      '2002': { amount: 1800.75, status: 'rejected', supplier: 'Rejected Supplier B', createdAt: '2024-01-11', category: 'Invalid Request', rejectedAt: '2024-01-29' },
-      '2003': { amount: 4500.00, status: 'paid', supplier: 'Quick Pay Corp', createdAt: '2024-01-12', category: 'Express Service', paidAt: '2024-01-30' },
-      '2004': { amount: 950.25, status: 'cancelled', supplier: 'Cancelled Order Ltd', createdAt: '2024-01-13', category: 'Cancelled Order', cancelledAt: '2024-01-31' },
-      '2005': { amount: 6750.00, status: 'disputed', supplier: 'Dispute Corp', createdAt: '2024-01-14', category: 'Disputed Service', disputedAt: '2024-02-01' },
-      
-      // High-value invoices
-      '3001': { amount: 50000.00, status: 'pending', supplier: 'Enterprise Solutions Mega Corp', createdAt: '2024-01-28', category: 'Enterprise Software' },
-      '3002': { amount: 75000.50, status: 'pending', supplier: 'Industrial Equipment Specialists', createdAt: '2024-01-29', category: 'Industrial Equipment' },
-      '3003': { amount: 125000.00, status: 'pending', supplier: 'Commercial Real Estate Partners', createdAt: '2024-01-30', category: 'Real Estate Services' },
-      
-      // Small value invoices
-      '4001': { amount: 25.99, status: 'pending', supplier: 'Coffee Shop Corner', createdAt: '2024-02-01', category: 'Office Refreshments' },
-      '4002': { amount: 89.50, status: 'pending', supplier: 'Stationery World', createdAt: '2024-02-02', category: 'Office Supplies' },
-      '4003': { amount: 15.75, status: 'pending', supplier: 'Quick Print Services', createdAt: '2024-02-03', category: 'Printing' },
-      
-      // International suppliers
-      '5001': { amount: 3500.00, status: 'pending', supplier: 'European Tech Solutions GmbH', createdAt: '2024-02-04', category: 'International Services', currency: 'EUR' },
-      '5002': { amount: 8200.00, status: 'pending', supplier: 'Asian Manufacturing Co Ltd', createdAt: '2024-02-05', category: 'Manufacturing', currency: 'USD' },
-      '5003': { amount: 1250.00, status: 'pending', supplier: 'Canadian Consulting Inc', createdAt: '2024-02-06', category: 'Consulting', currency: 'CAD' },
-      
-      // Edge cases for testing
-      '6001': { amount: 0.01, status: 'pending', supplier: 'Minimal Amount Test', createdAt: '2024-02-07', category: 'Test Case' },
-      '6002': { amount: 999999.99, status: 'pending', supplier: 'Maximum Amount Test', createdAt: '2024-02-08', category: 'Large Transaction' },
-      '6003': { amount: 1000.001, status: 'pending', supplier: 'Precision Test Corp', createdAt: '2024-02-09', category: 'Decimal Precision' }
+      // Different status invoices
+      '2001': { amount: 3200.00, status: 'paid', supplier: 'Paid Supplier A' },
+      '2002': { amount: 1800.75, status: 'rejected', supplier: 'Rejected Supplier B' },
     };
 
-    const invoice = mockInvoices[invoiceId.toString()];
+    const invoiceIdStr = invoiceId.toString();
+    const invoice = mockInvoices[invoiceIdStr];
+    
+    console.log(`Looking up invoice: ${invoiceIdStr}`);
+    console.log(`Found invoice:`, invoice);
     
     if (!invoice) {
-      console.log(`Invoice ${invoiceId} not found`);
+      console.log(`❌ Invoice ${invoiceIdStr} not found in database`);
       return false;
     }
 
     if (invoice.status !== 'pending') {
-      console.log(`Invoice ${invoiceId} status is ${invoice.status}, not pending`);
+      console.log(`❌ Invoice ${invoiceIdStr} status is '${invoice.status}', not 'pending'`);
       return false;
     }
 
-    if (parseFloat(invoice.amount) !== parseFloat(amount)) {
-      console.log(`Invoice ${invoiceId} amount mismatch: expected ${invoice.amount}, got ${amount}`);
+    // Enhanced amount comparison with multiple parsing attempts
+    const expectedAmount = parseFloat(invoice.amount);
+    let providedAmount;
+    
+    // Try different parsing methods
+    if (typeof amount === 'string') {
+      providedAmount = parseFloat(amount);
+    } else if (typeof amount === 'number') {
+      providedAmount = amount;
+    } else {
+      console.log(`❌ Invalid amount type: ${typeof amount}`);
+      return false;
+    }
+    
+    console.log(`Expected amount: ${expectedAmount}`);
+    console.log(`Provided amount: ${providedAmount}`);
+    
+    // Use a small epsilon for floating point comparison
+    const epsilon = 0.001;
+    const amountDifference = Math.abs(expectedAmount - providedAmount);
+    
+    console.log(`Amount difference: ${amountDifference}`);
+    
+    if (amountDifference > epsilon) {
+      console.log(`❌ Invoice ${invoiceIdStr} amount mismatch:`);
+      console.log(`   Expected: ${expectedAmount}`);
+      console.log(`   Provided: ${providedAmount}`);
+      console.log(`   Difference: ${amountDifference}`);
       return false;
     }
 
-    console.log(`Invoice ${invoiceId} verified successfully`);
+    console.log(`✅ Invoice ${invoiceIdStr} verified successfully`);
+    console.log(`--- VERIFICATION LOGIC END ---\n`);
     return true;
 
   } catch (error) {
-    console.error('Error in verification logic:', error);
+    console.error('❌ Error in verification logic:', error);
     return false;
   }
 }
 
-// 2. Get invoice details endpoint (for debugging/testing)
+// Test endpoint for easier debugging
+app.post('/api/test-verification', async (req, res) => {
+  try {
+    const { invoiceId = '12345', amount = '5000' } = req.body;
+    
+    console.log('Test verification request:', { invoiceId, amount });
+    
+    const isValid = await verifyInvoiceLogic(invoiceId, amount);
+    
+    res.json({
+      isValid,
+      invoiceId,
+      amount,
+      timestamp: Date.now(),
+      message: 'Test verification completed',
+      encodedResult: isValid ? 1 : 0
+    });
+
+  } catch (error) {
+    console.error('Test verification error:', error);
+    res.status(500).json({
+      error: 'Test verification failed',
+      message: error.message,
+      isValid: false
+    });
+  }
+});
+
+// Get invoice details endpoint (for debugging)
 app.get('/api/invoice/:invoiceId', async (req, res) => {
   try {
     const { invoiceId } = req.params;
     
-    // Validate authorization
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ 
-        error: 'Unauthorized',
-        message: 'Valid Bearer token required'
-      });
-    }
-
-    const token = authHeader.split(' ')[1];
-    if (token !== process.env.API_KEY) {
-      return res.status(401).json({ 
-        error: 'Unauthorized',
-        message: 'Invalid API key'
-      });
-    }
-
-    // Mock invoice lookup
     const mockInvoices = {
-      // Pending invoices (valid for verification)
-      '1001': { id: '1001', amount: 1250.50, status: 'pending', supplier: 'TechCorp Solutions', createdAt: '2024-01-15', category: 'Software License' },
-      '1002': { id: '1002', amount: 3750.00, status: 'pending', supplier: 'Global Manufacturing Ltd', createdAt: '2024-01-16', category: 'Raw Materials' },
-      '1003': { id: '1003', amount: 890.25, status: 'pending', supplier: 'Office Supplies Pro', createdAt: '2024-01-17', category: 'Office Equipment' },
-      '1004': { id: '1004', amount: 15000.00, status: 'pending', supplier: 'Construction Materials Inc', createdAt: '2024-01-18', category: 'Construction' },
-      '1005': { id: '1005', amount: 2200.75, status: 'pending', supplier: 'Marketing Agency Plus', createdAt: '2024-01-19', category: 'Marketing Services' },
-      '1006': { id: '1006', amount: 450.00, status: 'pending', supplier: 'Local Catering Services', createdAt: '2024-01-20', category: 'Catering' },
-      '1007': { id: '1007', amount: 8500.00, status: 'pending', supplier: 'IT Consulting Group', createdAt: '2024-01-21', category: 'Consulting' },
-      '1008': { id: '1008', amount: 1875.30, status: 'pending', supplier: 'Energy Solutions Corp', createdAt: '2024-01-22', category: 'Utilities' },
-      '1009': { id: '1009', amount: 12000.00, status: 'pending', supplier: 'Heavy Machinery Rentals', createdAt: '2024-01-23', category: 'Equipment Rental' },
-      '1010': { id: '1010', amount: 675.50, status: 'pending', supplier: 'Legal Services LLC', createdAt: '2024-01-24', category: 'Legal Services' },
-      
-      // Test invoices
-      '12345': { id: '12345', amount: 5000.00, status: 'pending', supplier: 'Test Supplier', createdAt: '2024-01-25', category: 'Test Category' },
-      '99999': { id: '99999', amount: 999.99, status: 'pending', supplier: 'Debug Supplier', createdAt: '2024-01-26', category: 'Testing' },
-      '55555': { id: '55555', amount: 7500.25, status: 'pending', supplier: 'Demo Company', createdAt: '2024-01-27', category: 'Demo Services' },
-      
-      // Already processed invoices (invalid for verification)
-      '2001': { id: '2001', amount: 3200.00, status: 'paid', supplier: 'Paid Supplier A', createdAt: '2024-01-10', category: 'Completed Services', paidAt: '2024-01-28' },
-      '2002': { id: '2002', amount: 1800.75, status: 'rejected', supplier: 'Rejected Supplier B', createdAt: '2024-01-11', category: 'Invalid Request', rejectedAt: '2024-01-29' },
-      '2003': { id: '2003', amount: 4500.00, status: 'paid', supplier: 'Quick Pay Corp', createdAt: '2024-01-12', category: 'Express Service', paidAt: '2024-01-30' },
-      '2004': { id: '2004', amount: 950.25, status: 'cancelled', supplier: 'Cancelled Order Ltd', createdAt: '2024-01-13', category: 'Cancelled Order', cancelledAt: '2024-01-31' },
-      '2005': { id: '2005', amount: 6750.00, status: 'disputed', supplier: 'Dispute Corp', createdAt: '2024-01-14', category: 'Disputed Service', disputedAt: '2024-02-01' },
-      
-      // High-value invoices
-      '3001': { id: '3001', amount: 50000.00, status: 'pending', supplier: 'Enterprise Solutions Mega Corp', createdAt: '2024-01-28', category: 'Enterprise Software' },
-      '3002': { id: '3002', amount: 75000.50, status: 'pending', supplier: 'Industrial Equipment Specialists', createdAt: '2024-01-29', category: 'Industrial Equipment' },
-      '3003': { id: '3003', amount: 125000.00, status: 'pending', supplier: 'Commercial Real Estate Partners', createdAt: '2024-01-30', category: 'Real Estate Services' },
-      
-      // Small value invoices
-      '4001': { id: '4001', amount: 25.99, status: 'pending', supplier: 'Coffee Shop Corner', createdAt: '2024-02-01', category: 'Office Refreshments' },
-      '4002': { id: '4002', amount: 89.50, status: 'pending', supplier: 'Stationery World', createdAt: '2024-02-02', category: 'Office Supplies' },
-      '4003': { id: '4003', amount: 15.75, status: 'pending', supplier: 'Quick Print Services', createdAt: '2024-02-03', category: 'Printing' },
-      
-      // International suppliers
-      '5001': { id: '5001', amount: 3500.00, status: 'pending', supplier: 'European Tech Solutions GmbH', createdAt: '2024-02-04', category: 'International Services', currency: 'EUR' },
-      '5002': { id: '5002', amount: 8200.00, status: 'pending', supplier: 'Asian Manufacturing Co Ltd', createdAt: '2024-02-05', category: 'Manufacturing', currency: 'USD' },
-      '5003': { id: '5003', amount: 1250.00, status: 'pending', supplier: 'Canadian Consulting Inc', createdAt: '2024-02-06', category: 'Consulting', currency: 'CAD' },
-      
-      // Edge cases for testing
-      '6001': { id: '6001', amount: 0.01, status: 'pending', supplier: 'Minimal Amount Test', createdAt: '2024-02-07', category: 'Test Case' },
-      '6002': { id: '6002', amount: 999999.99, status: 'pending', supplier: 'Maximum Amount Test', createdAt: '2024-02-08', category: 'Large Transaction' },
-      '6003': { id: '6003', amount: 1000.001, status: 'pending', supplier: 'Precision Test Corp', createdAt: '2024-02-09', category: 'Decimal Precision' }
+      '1001': { id: '1001', amount: 1250.50, status: 'pending', supplier: 'TechCorp Solutions' },
+      '1002': { id: '1002', amount: 3750.00, status: 'pending', supplier: 'Global Manufacturing Ltd' },
+      '1003': { id: '1003', amount: 890.25, status: 'pending', supplier: 'Office Supplies Pro' },
+      '12345': { id: '12345', amount: 5000.00, status: 'pending', supplier: 'Test Supplier' },
+      '99999': { id: '99999', amount: 999.99, status: 'pending', supplier: 'Debug Supplier' },
+      '2001': { id: '2001', amount: 3200.00, status: 'paid', supplier: 'Paid Supplier A' },
+      '2002': { id: '2002', amount: 1800.75, status: 'rejected', supplier: 'Rejected Supplier B' },
     };
 
     const invoice = mockInvoices[invoiceId];
@@ -246,7 +270,8 @@ app.get('/api/invoice/:invoiceId', async (req, res) => {
     if (!invoice) {
       return res.status(404).json({
         error: 'Invoice not found',
-        invoiceId
+        invoiceId,
+        availableInvoices: Object.keys(mockInvoices)
       });
     }
 
@@ -265,294 +290,23 @@ app.get('/api/invoice/:invoiceId', async (req, res) => {
   }
 });
 
-// 3. Bulk invoice verification endpoint
-app.post('/api/verify-invoices-bulk', async (req, res) => {
-  try {
-    const { invoices } = req.body; // Array of {invoiceId, amount}
-    
-    if (!invoices || !Array.isArray(invoices)) {
-      return res.status(400).json({
-        error: 'Invalid request',
-        message: 'invoices array is required'
-      });
-    }
+// List all available invoices for testing
+app.get('/api/invoices', (req, res) => {
+  const mockInvoices = {
+    '1001': { id: '1001', amount: 1250.50, status: 'pending', supplier: 'TechCorp Solutions' },
+    '1002': { id: '1002', amount: 3750.00, status: 'pending', supplier: 'Global Manufacturing Ltd' },
+    '1003': { id: '1003', amount: 890.25, status: 'pending', supplier: 'Office Supplies Pro' },
+    '12345': { id: '12345', amount: 5000.00, status: 'pending', supplier: 'Test Supplier' },
+    '99999': { id: '99999', amount: 999.99, status: 'pending', supplier: 'Debug Supplier' },
+    '2001': { id: '2001', amount: 3200.00, status: 'paid', supplier: 'Paid Supplier A' },
+    '2002': { id: '2002', amount: 1800.75, status: 'rejected', supplier: 'Rejected Supplier B' },
+  };
 
-    // Validate authorization
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ 
-        error: 'Unauthorized',
-        message: 'Valid Bearer token required'
-      });
-    }
-
-    const token = authHeader.split(' ')[1];
-    if (token !== process.env.API_KEY) {
-      return res.status(401).json({ 
-        error: 'Unauthorized',
-        message: 'Invalid API key'
-      });
-    }
-
-    const results = [];
-    
-    for (const invoice of invoices) {
-      const { invoiceId, amount } = invoice;
-      const isValid = await verifyInvoiceLogic(invoiceId, amount);
-      
-      results.push({
-        invoiceId,
-        amount,
-        isValid,
-        timestamp: Date.now()
-      });
-    }
-
-    res.json({
-      success: true,
-      results,
-      totalProcessed: results.length,
-      validCount: results.filter(r => r.isValid).length,
-      timestamp: Date.now()
-    });
-
-  } catch (error) {
-    console.error('Bulk verification error:', error);
-    res.status(500).json({
-      error: 'Bulk verification failed',
-      message: error.message
-    });
-  }
-});
-
-// 4. Test endpoint for Chainlink Functions testing
-app.post('/api/test-verification', async (req, res) => {
-  try {
-    const { invoiceId = '12345', amount = '5000' } = req.body;
-    
-    console.log('Test verification request:', { invoiceId, amount });
-    
-    const isValid = await verifyInvoiceLogic(invoiceId, amount);
-    
-    res.json({
-      isValid,
-      invoiceId,
-      amount,
-      timestamp: Date.now(),
-      message: 'Test verification completed',
-      encodedResult: isValid ? 1 : 0 // Same format as your smart contract expects
-    });
-
-  } catch (error) {
-    console.error('Test verification error:', error);
-    res.status(500).json({
-      error: 'Test verification failed',
-      message: error.message,
-      isValid: false
-    });
-  }
-});
-
-// 5. Computation endpoint - for complex calculations
-app.post('/api/compute', async (req, res) => {
-  try {
-    const { operation, data, parameters } = req.body;
-
-    if (!operation || !data) {
-      return res.status(400).json({ error: 'operation and data are required' });
-    }
-
-    let result;
-
-    switch (operation) {
-      case 'average':
-        const values = Array.isArray(data) ? data : Object.values(data);
-        result = values.reduce((sum, val) => sum + Number(val), 0) / values.length;
-        break;
-      
-      case 'volatility':
-        const prices = Array.isArray(data) ? data : Object.values(data);
-        const mean = prices.reduce((sum, val) => sum + Number(val), 0) / prices.length;
-        const variance = prices.reduce((sum, val) => sum + Math.pow(Number(val) - mean, 2), 0) / prices.length;
-        result = Math.sqrt(variance);
-        break;
-      
-      case 'weighted_average':
-        if (!parameters?.weights) {
-          return res.status(400).json({ error: 'weights required for weighted_average' });
-        }
-        const weightedSum = data.reduce((sum, val, i) => sum + (Number(val) * parameters.weights[i]), 0);
-        const totalWeight = parameters.weights.reduce((sum, weight) => sum + weight, 0);
-        result = weightedSum / totalWeight;
-        break;
-      
-      default:
-        return res.status(400).json({ error: 'Unsupported operation' });
-    }
-
-    res.json({
-      success: true,
-      operation,
-      result,
-      timestamp: Date.now()
-    });
-  } catch (error) {
-    console.error('Error in computation:', error);
-    res.status(500).json({
-      error: 'Computation failed',
-      message: error.message
-    });
-  }
-});
-
-// 3. Aggregation endpoint - combine multiple data sources
-app.post('/api/aggregate', async (req, res) => {
-  try {
-    const { sources, method = 'median' } = req.body;
-
-    if (!sources || !Array.isArray(sources)) {
-      return res.status(400).json({ error: 'sources array is required' });
-    }
-
-    // Mock aggregation logic
-    const values = sources.map(source => source.value).filter(val => val !== null && val !== undefined);
-    
-    if (values.length === 0) {
-      return res.status(400).json({ error: 'No valid values to aggregate' });
-    }
-
-    let result;
-    const sortedValues = values.sort((a, b) => a - b);
-
-    switch (method) {
-      case 'median':
-        const mid = Math.floor(sortedValues.length / 2);
-        result = sortedValues.length % 2 === 0 
-          ? (sortedValues[mid - 1] + sortedValues[mid]) / 2 
-          : sortedValues[mid];
-        break;
-      
-      case 'mean':
-        result = values.reduce((sum, val) => sum + val, 0) / values.length;
-        break;
-      
-      case 'min':
-        result = Math.min(...values);
-        break;
-      
-      case 'max':
-        result = Math.max(...values);
-        break;
-      
-      default:
-        return res.status(400).json({ error: 'Unsupported aggregation method' });
-    }
-
-    res.json({
-      success: true,
-      method,
-      result,
-      sources_count: values.length,
-      timestamp: Date.now()
-    });
-  } catch (error) {
-    console.error('Error in aggregation:', error);
-    res.status(500).json({
-      error: 'Aggregation failed',
-      message: error.message
-    });
-  }
-});
-
-// 4. Validation endpoint - validate data integrity
-app.post('/api/validate', async (req, res) => {
-  try {
-    const { data, rules } = req.body;
-
-    if (!data || !rules) {
-      return res.status(400).json({ error: 'data and rules are required' });
-    }
-
-    const validationResults = [];
-
-    for (const rule of rules) {
-      const { field, type, min, max, required } = rule;
-      const value = data[field];
-
-      const result = {
-        field,
-        valid: true,
-        errors: []
-      };
-
-      if (required && (value === null || value === undefined)) {
-        result.valid = false;
-        result.errors.push('Field is required');
-      }
-
-      if (value !== null && value !== undefined) {
-        if (type === 'number' && isNaN(Number(value))) {
-          result.valid = false;
-          result.errors.push('Must be a number');
-        }
-
-        if (type === 'number' && !isNaN(Number(value))) {
-          const numValue = Number(value);
-          if (min !== undefined && numValue < min) {
-            result.valid = false;
-            result.errors.push(`Must be >= ${min}`);
-          }
-          if (max !== undefined && numValue > max) {
-            result.valid = false;
-            result.errors.push(`Must be <= ${max}`);
-          }
-        }
-      }
-
-      validationResults.push(result);
-    }
-
-    const isValid = validationResults.every(result => result.valid);
-
-    res.json({
-      success: true,
-      valid: isValid,
-      results: validationResults,
-      timestamp: Date.now()
-    });
-  } catch (error) {
-    console.error('Error in validation:', error);
-    res.status(500).json({
-      error: 'Validation failed',
-      message: error.message
-    });
-  }
-});
-
-// 5. Webhook endpoint for receiving data updates
-app.post('/api/webhook/:id', (req, res) => {
-  try {
-    const { id } = req.params;
-    const payload = req.body;
-
-    console.log(`Webhook ${id} received:`, payload);
-
-    // Process webhook data here
-    // You might want to store this in a database or trigger other actions
-
-    res.json({
-      success: true,
-      webhook_id: id,
-      received_at: Date.now(),
-      message: 'Webhook processed successfully'
-    });
-  } catch (error) {
-    console.error('Webhook error:', error);
-    res.status(500).json({
-      error: 'Webhook processing failed',
-      message: error.message
-    });
-  }
+  res.json({
+    success: true,
+    invoices: Object.values(mockInvoices),
+    count: Object.keys(mockInvoices).length
+  });
 });
 
 // Error handling middleware
@@ -568,7 +322,15 @@ app.use((error, req, res, next) => {
 app.use((req, res) => {
   res.status(404).json({
     error: 'Endpoint not found',
-    message: `${req.method} ${req.path} is not a valid endpoint`
+    message: `${req.method} ${req.path} is not a valid endpoint`,
+    availableEndpoints: [
+      'GET /health',
+      'POST /api/verify-invoice',
+      'POST /api/test-verification',
+      'POST /debug/verify-invoice',
+      'GET /api/invoice/:invoiceId',
+      'GET /api/invoices'
+    ]
   });
 });
 
@@ -577,4 +339,12 @@ app.listen(PORT, () => {
   console.log(`🚀 Chainlink Functions server running on port ${PORT}`);
   console.log(`📋 Health check: http://localhost:${PORT}/health`);
   console.log(`🔗 API base URL: http://localhost:${PORT}/api`);
+  console.log(`🐛 Debug endpoint: http://localhost:${PORT}/debug/verify-invoice`);
+  
+  // Check if API_KEY is set
+  if (!process.env.API_KEY) {
+    console.warn('⚠️  WARNING: API_KEY environment variable is not set!');
+  } else {
+    console.log('✅ API_KEY is configured');
+  }
 });
