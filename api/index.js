@@ -79,61 +79,61 @@ app.post('/debug/verify-invoice', async (req, res) => {
   }
 });
 
-// Main API endpoint - This is what your Chainlink function calls
+// Enhanced main API endpoint with better logging
 app.post('/api/verify-invoice', async (req, res) => {
   try {
     console.log('=== CHAINLINK VERIFICATION REQUEST START ===');
-    console.log('Full request headers:', JSON.stringify(req.headers, null, 2));
     console.log('Request body:', JSON.stringify(req.body, null, 2));
-    console.log('Request method:', req.method);
-    console.log('Request URL:', req.url);
-    console.log('Environment variables check:');
-    console.log('- Authorization disabled for development');
+    console.log('Request headers:', JSON.stringify(req.headers, null, 2));
     
     const { invoiceId } = req.body;
+    console.log('Received invoiceId:', invoiceId, 'Type:', typeof invoiceId);
 
     // Enhanced parameter validation
-    if (!invoiceId && invoiceId !== 0 && invoiceId !== '0') {
-      console.log('ERROR: Missing invoiceId');
+    if (invoiceId === undefined || invoiceId === null) {
+      console.log('ERROR: invoiceId is undefined or null');
       return res.status(400).json({ 
         error: 'Missing required parameters',
         message: 'invoiceId is required',
-        received: { invoiceId },
         isValid: false
       });
     }
 
-    console.log('⚠  No authorization check - running in development mode');
-    console.log(`Processing invoice verification - ID: ${invoiceId}`);
+    console.log('Processing invoice verification - ID:', invoiceId);
 
     const isValid = await verifyInvoiceLogic(invoiceId);
+    console.log('Verification result:', isValid);
 
-    console.log(`Verification result: ${isValid}`);
-    console.log('=== CHAINLINK VERIFICATION REQUEST END ===');
-
-    // Return response in the exact format Chainlink expects
+    // Simple, consistent response format
     const response = {
-      isValid,
-      invoiceId,
-      normalizedId: normalizeInvoiceId(invoiceId),
+      isValid: isValid,
+      invoiceId: invoiceId,
       timestamp: Date.now(),
       message: isValid ? 'Invoice verified successfully' : 'Invoice verification failed'
     };
 
     console.log('Sending response:', JSON.stringify(response, null, 2));
-    res.json(response);
+    console.log('=== CHAINLINK VERIFICATION REQUEST END ===');
+    
+    // Set explicit headers
+    res.set('Content-Type', 'application/json');
+    res.status(200).json(response);
 
   } catch (error) {
     console.error('Invoice verification error:', error);
     console.error('Error stack:', error.stack);
     
-    // Always return isValid: false on error
-    res.status(500).json({
+    const errorResponse = {
       error: 'Invoice verification failed',
       message: error.message,
       isValid: false,
       timestamp: Date.now()
-    });
+    };
+    
+    console.log('Sending error response:', JSON.stringify(errorResponse, null, 2));
+    
+    res.set('Content-Type', 'application/json');
+    res.status(500).json(errorResponse);
   }
 });
 
@@ -197,30 +197,55 @@ async function verifyInvoiceLogic(invoiceId) {
   }
 }
 
-// Test endpoint for easier debugging
-app.post('/api/test-verification', async (req, res) => {
+/// Add this debug endpoint to your Express app
+app.post('/api/debug-chainlink', async (req, res) => {
   try {
-    const { invoiceId = '12345' } = req.body;
+    console.log('=== CHAINLINK DEBUG START ===');
+    console.log('Full request object keys:', Object.keys(req));
+    console.log('Request method:', req.method);
+    console.log('Request URL:', req.url);
+    console.log('Request headers:', JSON.stringify(req.headers, null, 2));
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
+    console.log('Raw body:', req.rawBody);
+    console.log('Request query:', JSON.stringify(req.query, null, 2));
+    console.log('Request params:', JSON.stringify(req.params, null, 2));
     
-    console.log('Test verification request:', { invoiceId });
+    const { invoiceId } = req.body;
     
+    console.log('Extracted invoiceId:', invoiceId);
+    console.log('InvoiceId type:', typeof invoiceId);
+    console.log('InvoiceId toString():', String(invoiceId));
+    console.log('InvoiceId JSON.stringify():', JSON.stringify(invoiceId));
+    
+    // Test the verification logic
     const isValid = await verifyInvoiceLogic(invoiceId);
-    const normalizedId = normalizeInvoiceId(invoiceId);
     
-    res.json({
-      isValid,
-      invoiceId,
-      normalizedId,
+    const response = {
+      debug: true,
+      receivedData: {
+        body: req.body,
+        headers: req.headers,
+        method: req.method,
+        url: req.url
+      },
+      invoiceId: invoiceId,
+      invoiceIdType: typeof invoiceId,
+      isValid: isValid,
       timestamp: Date.now(),
-      message: 'Test verification completed',
-      encodedResult: isValid ? 1 : 0,
-      environment: 'Vercel'
-    });
-
+      environment: 'Vercel',
+      message: 'Debug response from Chainlink endpoint'
+    };
+    
+    console.log('Sending debug response:', JSON.stringify(response, null, 2));
+    console.log('=== CHAINLINK DEBUG END ===');
+    
+    res.set('Content-Type', 'application/json');
+    res.status(200).json(response);
+    
   } catch (error) {
-    console.error('Test verification error:', error);
+    console.error('Debug endpoint error:', error);
     res.status(500).json({
-      error: 'Test verification failed',
+      error: 'Debug failed',
       message: error.message,
       isValid: false
     });
