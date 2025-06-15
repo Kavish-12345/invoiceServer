@@ -1,4 +1,4 @@
-// api/index.js
+// Fixed api/index.js - ensure proper route handling
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -8,7 +8,11 @@ const app = express();
 
 // Middleware
 app.use(helmet());
-app.use(cors());
+app.use(cors({
+  origin: '*', // Be more permissive for testing
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -26,22 +30,19 @@ function normalizeInvoiceId(invoiceId) {
     return null;
   }
   
-  // Convert to string and remove any whitespace
   const idStr = String(invoiceId).trim();
   
-  // Handle the case where it might be "0" 
   if (idStr === '0') {
     return '0';
   }
   
-  // Remove leading zeros but keep at least one digit
   const normalizedId = idStr.replace(/^0+/, '') || '0';
   
   console.log(`Normalizing ID: "${invoiceId}" (${typeof invoiceId}) -> "${normalizedId}"`);
   return normalizedId;
 }
 
-// Health check endpoint
+// Health check endpoint - accessible at both root and /api
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'OK',
@@ -51,38 +52,22 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Debug endpoint to test without auth
-app.post('/debug/verify-invoice', async (req, res) => {
-  try {
-    const { invoiceId } = req.body;
-    console.log('DEBUG: Received request:', { invoiceId, type: typeof invoiceId });
-    
-    const isValid = await verifyInvoiceLogic(invoiceId);
-    
-    res.json({
-      isValid,
-      invoiceId,
-      normalizedId: normalizeInvoiceId(invoiceId),
-      debug: {
-        invoiceIdType: typeof invoiceId,
-        timestamp: Date.now(),
-        environment: 'Vercel'
-      }
-    });
-  } catch (error) {
-    console.error('DEBUG verification error:', error);
-    res.status(500).json({
-      error: 'Debug verification failed',
-      message: error.message,
-      isValid: false
-    });
-  }
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    environment: 'Vercel Serverless',
+    authorizationEnabled: false,
+    path: '/api/health'
+  });
 });
 
-// Enhanced main API endpoint with better logging
+// Main verification endpoint - this is what Chainlink calls
 app.post('/api/verify-invoice', async (req, res) => {
   try {
     console.log('=== CHAINLINK VERIFICATION REQUEST START ===');
+    console.log('Request method:', req.method);
+    console.log('Request URL:', req.url);
     console.log('Request body:', JSON.stringify(req.body, null, 2));
     console.log('Request headers:', JSON.stringify(req.headers, null, 2));
     
@@ -137,13 +122,12 @@ app.post('/api/verify-invoice', async (req, res) => {
   }
 });
 
-// Enhanced invoice verification function with better ID handling
+// Enhanced invoice verification function
 async function verifyInvoiceLogic(invoiceId) {
   try {
     console.log('\n--- VERIFICATION LOGIC START ---');
     console.log(`Input - InvoiceId: ${invoiceId} (type: ${typeof invoiceId})`);
     
-    // Normalize the invoice ID
     const normalizedId = normalizeInvoiceId(invoiceId);
     
     if (normalizedId === null) {
@@ -171,7 +155,7 @@ async function verifyInvoiceLogic(invoiceId) {
       '5000': { supplier: 'New Supplier', status: 'pending' },
       '6000': { supplier: 'Another Supplier', status: 'pending' },
       '7000': { supplier: 'Final Supplier', status: 'pending' },
-      '0': { supplier: 'Zero Invoice', status: 'pending' } // Handle zero case
+      '0': { supplier: 'Zero Invoice', status: 'pending' }
     };
 
     const invoice = mockInvoices[normalizedId];
@@ -197,136 +181,58 @@ async function verifyInvoiceLogic(invoiceId) {
   }
 }
 
-/// Add this debug endpoint to your Express app
-app.post('/api/debug-chainlink', async (req, res) => {
+// Debug endpoints for testing
+app.post('/debug/verify-invoice', async (req, res) => {
   try {
-    console.log('=== CHAINLINK DEBUG START ===');
-    console.log('Full request object keys:', Object.keys(req));
-    console.log('Request method:', req.method);
-    console.log('Request URL:', req.url);
-    console.log('Request headers:', JSON.stringify(req.headers, null, 2));
-    console.log('Request body:', JSON.stringify(req.body, null, 2));
-    console.log('Raw body:', req.rawBody);
-    console.log('Request query:', JSON.stringify(req.query, null, 2));
-    console.log('Request params:', JSON.stringify(req.params, null, 2));
-    
     const { invoiceId } = req.body;
+    console.log('DEBUG: Received request:', { invoiceId, type: typeof invoiceId });
     
-    console.log('Extracted invoiceId:', invoiceId);
-    console.log('InvoiceId type:', typeof invoiceId);
-    console.log('InvoiceId toString():', String(invoiceId));
-    console.log('InvoiceId JSON.stringify():', JSON.stringify(invoiceId));
-    
-    // Test the verification logic
     const isValid = await verifyInvoiceLogic(invoiceId);
     
-    const response = {
-      debug: true,
-      receivedData: {
-        body: req.body,
-        headers: req.headers,
-        method: req.method,
-        url: req.url
-      },
-      invoiceId: invoiceId,
-      invoiceIdType: typeof invoiceId,
-      isValid: isValid,
-      timestamp: Date.now(),
-      environment: 'Vercel',
-      message: 'Debug response from Chainlink endpoint'
-    };
-    
-    console.log('Sending debug response:', JSON.stringify(response, null, 2));
-    console.log('=== CHAINLINK DEBUG END ===');
-    
-    res.set('Content-Type', 'application/json');
-    res.status(200).json(response);
-    
+    res.json({
+      isValid,
+      invoiceId,
+      normalizedId: normalizeInvoiceId(invoiceId),
+      debug: {
+        invoiceIdType: typeof invoiceId,
+        timestamp: Date.now(),
+        environment: 'Vercel'
+      }
+    });
   } catch (error) {
-    console.error('Debug endpoint error:', error);
+    console.error('DEBUG verification error:', error);
     res.status(500).json({
-      error: 'Debug failed',
+      error: 'Debug verification failed',
       message: error.message,
       isValid: false
     });
   }
 });
 
-// Get invoice details endpoint (for debugging)
-app.get('/api/invoice/:invoiceId', async (req, res) => {
-  try {
-    const { invoiceId } = req.params;
-    const normalizedId = normalizeInvoiceId(invoiceId);
-    
-    const mockInvoices = {
-      '1001': { id: '1001', supplier: 'TechCorp Solutions', status: 'pending' },
-      '1002': { id: '1002', supplier: 'Global Manufacturing Ltd', status: 'pending' },
-      '1003': { id: '1003', supplier: 'Office Supplies Pro', status: 'pending' },
-      '12345': { id: '12345', supplier: 'Test Supplier', status: 'pending' },
-      '99999': { id: '99999', supplier: 'Debug Supplier', status: 'pending' },
-      '100': { id: '100', supplier: 'Small Invoice', status: 'pending' },
-      '200': { id: '200', supplier: 'Medium Invoice', status: 'pending' },
-      '300': { id: '300', supplier: 'Large Invoice', status: 'pending' },
-      '2001': { id: '2001', supplier: 'Supplier A', status: 'pending' },
-      '2002': { id: '2002', supplier: 'Supplier B', status: 'pending' },
-      '5000': { id: '5000', supplier: 'New Supplier', status: 'pending' },
-      '6000': { id: '6000', supplier: 'Another Supplier', status: 'pending' },
-      '7000': { id: '7000', supplier: 'Final Supplier', status: 'pending' },
-      '0': { id: '0', supplier: 'Zero Invoice', status: 'pending' }
-    };
-
-    const invoice = mockInvoices[normalizedId];
-    
-    if (!invoice) {
-      return res.status(404).json({
-        error: 'Invoice not found',
-        invoiceId,
-        normalizedId,
-        availableInvoices: Object.keys(mockInvoices)
-      });
-    }
-
-    res.json({
-      success: true,
-      invoice,
-      originalId: invoiceId,
-      normalizedId,
-      timestamp: Date.now()
-    });
-
-  } catch (error) {
-    console.error('Error fetching invoice:', error);
-    res.status(500).json({
-      error: 'Failed to fetch invoice',
-      message: error.message
-    });
-  }
+// Catch-all for API routes to help debug 404s
+app.use('/api/*', (req, res) => {
+  console.log('404 - API route not found:', req.method, req.originalUrl);
+  res.status(404).json({
+    error: 'API endpoint not found',
+    method: req.method,
+    path: req.originalUrl,
+    availableEndpoints: [
+      'GET /health',
+      'GET /api/health',
+      'POST /api/verify-invoice',
+      'POST /debug/verify-invoice'
+    ]
+  });
 });
 
-// List all available invoices for testing
-app.get('/api/invoices', (req, res) => {
-  const mockInvoices = {
-    '1001': { id: '1001', supplier: 'TechCorp Solutions', status: 'pending' },
-    '1002': { id: '1002', supplier: 'Global Manufacturing Ltd', status: 'pending' },
-    '1003': { id: '1003', supplier: 'Office Supplies Pro', status: 'pending' },
-    '12345': { id: '12345', supplier: 'Test Supplier', status: 'pending' },
-    '99999': { id: '99999', supplier: 'Debug Supplier', status: 'pending' },
-    '100': { id: '100', supplier: 'Small Invoice', status: 'pending' },
-    '200': { id: '200', supplier: 'Medium Invoice', status: 'pending' },
-    '300': { id: '300', supplier: 'Large Invoice', status: 'pending' },
-    '2001': { id: '2001', supplier: 'Supplier A', status: 'pending' },
-    '2002': { id: '2002', supplier: 'Supplier B', status: 'pending' },
-    '5000': { id: '5000', supplier: 'New Supplier', status: 'pending' },
-    '6000': { id: '6000', supplier: 'Another Supplier', status: 'pending' },
-    '7000': { id: '7000', supplier: 'Final Supplier', status: 'pending' },
-    '0': { id: '0', supplier: 'Zero Invoice', status: 'pending' }
-  };
-
-  res.json({
-    success: true,
-    invoices: Object.values(mockInvoices),
-    count: Object.keys(mockInvoices).length,
-    environment: 'Vercel'
+// Root catch-all
+app.use('*', (req, res) => {
+  console.log('404 - Route not found:', req.method, req.originalUrl);
+  res.status(404).json({
+    error: 'Route not found',
+    method: req.method,
+    path: req.originalUrl,
+    message: 'This endpoint does not exist'
   });
 });
 
@@ -339,21 +245,5 @@ app.use((error, req, res, next) => {
   });
 });
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    error: 'Endpoint not found',
-    message: `${req.method} ${req.path} is not a valid endpoint`,
-    availableEndpoints: [
-      'GET /health',
-      'POST /api/verify-invoice',
-      'POST /api/test-verification',
-      'POST /debug/verify-invoice',
-      'GET /api/invoice/:invoiceId',
-      'GET /api/invoices'
-    ]
-  });
-});
-
-// Export the Express app for Vercel
+// Export for Vercel
 module.exports = app;
